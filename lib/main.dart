@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:sensors_plus/sensors_plus.dart';
 
-// ENTRY
+// ✅ ENTRY
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final levels = await loadLevels();
@@ -59,7 +59,7 @@ class WallData {
   }
 }
 
-// ✅ MAIN GAME CLASS
+// ✅ MAIN GAME
 class TiltMazePhysicsGame extends Forge2DGame with ContactCallbacks {
   TiltMazePhysicsGame(this.levels) : super(gravity: Vector2.zero(), zoom: 30);
 
@@ -78,25 +78,22 @@ class TiltMazePhysicsGame extends Forge2DGame with ContactCallbacks {
   }
 
   Future<void> loadLevel() async {
-    world.bodies.forEach(world.destroyBody);
+    world.forEachBody((body) => world.destroyBody(body));
     final level = levels[currentLevelIndex];
 
-    // Ball
-    ball = Ball();
+    ball = Ball(this);
     add(ball);
 
-    // Goal
-    goal = Goal(level.goal);
+    goal = Goal(this, level.goal);
     add(goal!);
 
-    // Walls
     for (var w in level.walls) {
-      add(Wall(Vector2(w.x, w.y), Vector2(w.w, w.h)));
+      add(Wall(this, Vector2(w.x, w.y), Vector2(w.w, w.h)));
     }
   }
 
   @override
-  void beginContact(Contact contact) {
+  void beginContact(Object other, Contact contact) {
     final a = contact.fixtureA.body.userData;
     final b = contact.fixtureB.body.userData;
 
@@ -118,8 +115,12 @@ class TiltMazePhysicsGame extends Forge2DGame with ContactCallbacks {
   }
 }
 
-// ✅ BALL WITH BOUNCE
+// ✅ BALL
 class Ball extends BodyComponent {
+  final TiltMazePhysicsGame game;
+
+  Ball(this.game);
+
   @override
   Body createBody() {
     final shape = CircleShape()..radius = 0.3;
@@ -135,36 +136,42 @@ class Ball extends BodyComponent {
   }
 
   @override
-  void renderBody(Canvas canvas) {
+  void render(Canvas canvas) {
     final paint = Paint()..color = Colors.blue;
-    canvas.drawCircle(Offset.zero, 0.3 * zoom, paint);
+    canvas.drawCircle(
+      Offset.zero,
+      0.3 * game.camera.zoom,
+      paint,
+    );
   }
 }
 
-// ✅ STATIC WALL
+// ✅ WALL
 class Wall extends BodyComponent {
+  final TiltMazePhysicsGame game;
   final Vector2 pos, size;
 
-  Wall(this.pos, this.size);
+  Wall(this.game, this.pos, this.size);
 
   @override
   Body createBody() {
-    final shape = PolygonShape()..setAsBox(size.x, size.y);
+    final shape = PolygonShape()..setAsBoxXY(size.x, size.y);
     final fixtureDef = FixtureDef(shape);
     final bodyDef = BodyDef()
       ..type = BodyType.static
       ..position = pos;
-    return world.createBody(bodyDef)..createFixture(fixtureDef);
+    final body = world.createBody(bodyDef)..createFixture(fixtureDef);
+    return body;
   }
 
   @override
-  void renderBody(Canvas canvas) {
+  void render(Canvas canvas) {
     final paint = Paint()..color = Colors.black;
     canvas.drawRect(
       Rect.fromCenter(
         center: Offset.zero,
-        width: size.x * 2 * zoom,
-        height: size.y * 2 * zoom,
+        width: size.x * 2 * game.camera.zoom,
+        height: size.y * 2 * game.camera.zoom,
       ),
       paint,
     );
@@ -173,10 +180,11 @@ class Wall extends BodyComponent {
 
 // ✅ ANIMATED GOAL
 class Goal extends BodyComponent {
+  final TiltMazePhysicsGame game;
   final Vector2 pos;
   double angle = 0;
 
-  Goal(this.pos);
+  Goal(this.game, this.pos);
 
   @override
   Body createBody() {
@@ -191,12 +199,16 @@ class Goal extends BodyComponent {
   }
 
   @override
-  void renderBody(Canvas canvas) {
+  void render(Canvas canvas) {
     angle += 0.05;
     canvas.save();
     canvas.rotate(angle);
     final paint = Paint()..color = Colors.green;
-    canvas.drawCircle(Offset.zero, 0.4 * zoom, paint);
+    canvas.drawCircle(
+      Offset.zero,
+      0.4 * game.camera.zoom,
+      paint,
+    );
     canvas.restore();
   }
 }
