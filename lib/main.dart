@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:sensors_plus/sensors_plus.dart';
 
-// ✅ ENTRY
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final levels = await loadLevels();
@@ -19,7 +18,6 @@ void main() async {
   );
 }
 
-// ✅ LOAD LEVELS FROM JSON
 Future<List<LevelData>> loadLevels() async {
   final String data = await rootBundle.loadString('assets/levels.json');
   final jsonResult = jsonDecode(data);
@@ -59,7 +57,6 @@ class WallData {
   }
 }
 
-// ✅ MAIN GAME
 class TiltMazePhysicsGame extends Forge2DGame with ContactCallbacks {
   TiltMazePhysicsGame(this.levels) : super(gravity: Vector2.zero(), zoom: 30);
 
@@ -78,7 +75,7 @@ class TiltMazePhysicsGame extends Forge2DGame with ContactCallbacks {
   }
 
   Future<void> loadLevel() async {
-    world.forEachBody((body) => world.destroyBody(body));
+    children.whereType<BodyComponent>().forEach((b) => b.removeFromParent());
     final level = levels[currentLevelIndex];
 
     ball = Ball(this);
@@ -115,7 +112,6 @@ class TiltMazePhysicsGame extends Forge2DGame with ContactCallbacks {
   }
 }
 
-// ✅ BALL
 class Ball extends BodyComponent {
   final TiltMazePhysicsGame game;
 
@@ -140,13 +136,12 @@ class Ball extends BodyComponent {
     final paint = Paint()..color = Colors.blue;
     canvas.drawCircle(
       Offset.zero,
-      0.3 * game.camera.zoom,
+      0.3 * game.camera.viewfinder.zoom,
       paint,
     );
   }
 }
 
-// ✅ WALL
 class Wall extends BodyComponent {
   final TiltMazePhysicsGame game;
   final Vector2 pos, size;
@@ -170,15 +165,14 @@ class Wall extends BodyComponent {
     canvas.drawRect(
       Rect.fromCenter(
         center: Offset.zero,
-        width: size.x * 2 * game.camera.zoom,
-        height: size.y * 2 * game.camera.zoom,
+        width: size.x * 2 * game.camera.viewfinder.zoom,
+        height: size.y * 2 * game.camera.viewfinder.zoom,
       ),
       paint,
     );
   }
 }
 
-// ✅ ANIMATED GOAL
 class Goal extends BodyComponent {
   final TiltMazePhysicsGame game;
   final Vector2 pos;
@@ -206,14 +200,13 @@ class Goal extends BodyComponent {
     final paint = Paint()..color = Colors.green;
     canvas.drawCircle(
       Offset.zero,
-      0.4 * game.camera.zoom,
+      0.4 * game.camera.viewfinder.zoom,
       paint,
     );
     canvas.restore();
   }
 }
 
-// ✅ WIN OVERLAY
 class WinOverlay extends StatelessWidget {
   final TiltMazePhysicsGame game;
 
