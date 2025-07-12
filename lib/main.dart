@@ -1,173 +1,224 @@
-import 'package:flutter/material.dart';
+import 'dart:convert';
 import 'package:flame/game.dart';
-import 'package:flame/components.dart';
-import 'package:flame/collisions.dart';
+import 'package:flame_forge2d/flame_forge2d.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:sensors_plus/sensors_plus.dart';
 
-void main() {
+// ENTRY
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final levels = await loadLevels();
   runApp(
     GameWidget(
-      game: TiltMazeGame(),
+      game: TiltMazePhysicsGame(levels),
       overlayBuilderMap: {
-        'win': (_, game) => WinOverlay(game: game as TiltMazeGame),
+        'win': (_, game) => WinOverlay(game: game as TiltMazePhysicsGame),
       },
     ),
   );
 }
 
-// =========================
-// ✅ The Game Class
-// =========================
+// ✅ LOAD LEVELS FROM JSON
+Future<List<LevelData>> loadLevels() async {
+  final String data = await rootBundle.loadString('assets/levels.json');
+  final jsonResult = jsonDecode(data);
+  return (jsonResult['levels'] as List)
+      .map((e) => LevelData.fromJson(e))
+      .toList();
+}
 
-class TiltMazeGame extends FlameGame with HasCollisionDetection {
+class LevelData {
+  final Vector2 goal;
+  final List<WallData> walls;
+
+  LevelData({required this.goal, required this.walls});
+
+  factory LevelData.fromJson(Map<String, dynamic> json) {
+    return LevelData(
+      goal: Vector2(json['goal']['x'].toDouble(), json['goal']['y'].toDouble()),
+      walls: (json['walls'] as List)
+          .map((w) => WallData.fromJson(w))
+          .toList(),
+    );
+  }
+}
+
+class WallData {
+  final double x, y, w, h;
+
+  WallData({required this.x, required this.y, required this.w, required this.h});
+
+  factory WallData.fromJson(Map<String, dynamic> json) {
+    return WallData(
+      x: json['x'].toDouble(),
+      y: json['y'].toDouble(),
+      w: json['w'].toDouble(),
+      h: json['h'].toDouble(),
+    );
+  }
+}
+
+// ✅ MAIN GAME CLASS
+class TiltMazePhysicsGame extends Forge2DGame with ContactCallbacks {
+  TiltMazePhysicsGame(this.levels) : super(gravity: Vector2.zero(), zoom: 30);
+
+  final List<LevelData> levels;
+  int currentLevelIndex = 0;
+
   late Ball ball;
-  late Goal goal;
-
-  double speedX = 0;
-  double speedY = 0;
+  Goal? goal;
 
   @override
   Future<void> onLoad() async {
-    // Add Ball
-    ball = Ball()
-      ..size = Vector2.all(30)
-      ..position = size / 2;
-    add(ball);
-
-    // Add Walls
-    add(Wall(
-      position: Vector2(200, 300),
-      size: Vector2(100, 20),
-    ));
-
-    add(Wall(
-      position: Vector2(100, 500),
-      size: Vector2(20, 100),
-    ));
-
-    // Add Goal
-    goal = Goal()
-      ..size = Vector2.all(40)
-      ..position = Vector2(size.x - 60, size.y - 60);
-    add(goal);
-
-    // Listen to tilt
+    await loadLevel();
     accelerometerEvents.listen((event) {
-      speedX += event.x * -10;
-      speedY += event.y * 10;
+      ball.body.applyForce(Vector2(-event.x, event.y) * 5);
     });
   }
 
+  Future<void> loadLevel() async {
+    world.bodies.forEach(world.destroyBody);
+    final level = levels[currentLevelIndex];
+
+    // Ball
+    ball = Ball();
+    add(ball);
+
+    // Goal
+    goal = Goal(level.goal);
+    add(goal!);
+
+    // Walls
+    for (var w in level.walls) {
+      add(Wall(Vector2(w.x, w.y), Vector2(w.w, w.h)));
+    }
+  }
+
   @override
-  void update(double dt) {
-    super.update(dt);
+  void beginContact(Contact contact) {
+    final a = contact.fixtureA.body.userData;
+    final b = contact.fixtureB.body.userData;
 
-    // Update ball position
-    ball.position.add(Vector2(speedX, speedY) * dt);
-
-    // Friction
-    speedX *= 0.9;
-    speedY *= 0.9;
-
-    // Keep inside screen
-    ball.position.clamp(
-      Vector2.zero() + ball.size / 2,
-      size - ball.size / 2,
-    );
-
-    // Win check
-    if (ball.toRect().overlaps(goal.toRect())) {
+    if ((a is Ball && b is Goal) || (b is Ball && a is Goal)) {
       overlays.add('win');
       pauseEngine();
     }
   }
 
-  void reset() {
-    ball.position = size / 2;
-    speedX = 0;
-    speedY = 0;
+  void nextLevel() {
+    if (currentLevelIndex < levels.length - 1) {
+      currentLevelIndex++;
+    } else {
+      currentLevelIndex = 0;
+    }
+    loadLevel();
     resumeEngine();
     overlays.remove('win');
   }
 }
 
-// =========================
-// ✅ Ball Component
-// =========================
-
-class Ball extends PositionComponent with CollisionCallbacks {
-  Ball() {
-    add(CircleHitbox());
+// ✅ BALL WITH BOUNCE
+class Ball extends BodyComponent {
+  @override
+  Body createBody() {
+    final shape = CircleShape()..radius = 0.3;
+    final fixtureDef = FixtureDef(shape)
+      ..density = 1.0
+      ..restitution = 0.8;
+    final bodyDef = BodyDef()
+      ..type = BodyType.dynamic
+      ..position = Vector2.zero();
+    final body = world.createBody(bodyDef)..createFixture(fixtureDef);
+    body.userData = this;
+    return body;
   }
 
   @override
-  void render(Canvas canvas) {
-    super.render(canvas);
+  void renderBody(Canvas canvas) {
     final paint = Paint()..color = Colors.blue;
-    canvas.drawCircle(
-      Offset(size.x / 2, size.y / 2),
-      size.x / 2,
-      paint,
-    );
+    canvas.drawCircle(Offset.zero, 0.3 * zoom, paint);
   }
 }
 
-// =========================
-// ✅ Wall Component
-// =========================
+// ✅ STATIC WALL
+class Wall extends BodyComponent {
+  final Vector2 pos, size;
 
-class Wall extends PositionComponent with CollisionCallbacks {
-  Wall({required Vector2 position, required Vector2 size}) {
-    this.position = position;
-    this.size = size;
-    add(RectangleHitbox());
+  Wall(this.pos, this.size);
+
+  @override
+  Body createBody() {
+    final shape = PolygonShape()..setAsBox(size.x, size.y);
+    final fixtureDef = FixtureDef(shape);
+    final bodyDef = BodyDef()
+      ..type = BodyType.static
+      ..position = pos;
+    return world.createBody(bodyDef)..createFixture(fixtureDef);
   }
 
   @override
-  void render(Canvas canvas) {
-    super.render(canvas);
+  void renderBody(Canvas canvas) {
     final paint = Paint()..color = Colors.black;
-    canvas.drawRect(size.toRect(), paint);
-  }
-}
-
-// =========================
-// ✅ Goal Component
-// =========================
-
-class Goal extends PositionComponent {
-  @override
-  void render(Canvas canvas) {
-    super.render(canvas);
-    final paint = Paint()..color = Colors.green;
-    canvas.drawCircle(
-      Offset(size.x / 2, size.y / 2),
-      size.x / 2,
+    canvas.drawRect(
+      Rect.fromCenter(
+        center: Offset.zero,
+        width: size.x * 2 * zoom,
+        height: size.y * 2 * zoom,
+      ),
       paint,
     );
   }
 }
 
-// =========================
-// ✅ Win Overlay
-// =========================
+// ✅ ANIMATED GOAL
+class Goal extends BodyComponent {
+  final Vector2 pos;
+  double angle = 0;
 
+  Goal(this.pos);
+
+  @override
+  Body createBody() {
+    final shape = CircleShape()..radius = 0.4;
+    final fixtureDef = FixtureDef(shape)..isSensor = true;
+    final bodyDef = BodyDef()
+      ..type = BodyType.static
+      ..position = pos;
+    final body = world.createBody(bodyDef)..createFixture(fixtureDef);
+    body.userData = this;
+    return body;
+  }
+
+  @override
+  void renderBody(Canvas canvas) {
+    angle += 0.05;
+    canvas.save();
+    canvas.rotate(angle);
+    final paint = Paint()..color = Colors.green;
+    canvas.drawCircle(Offset.zero, 0.4 * zoom, paint);
+    canvas.restore();
+  }
+}
+
+// ✅ WIN OVERLAY
 class WinOverlay extends StatelessWidget {
-  final TiltMazeGame game;
+  final TiltMazePhysicsGame game;
 
   const WinOverlay({super.key, required this.game});
 
   @override
   Widget build(BuildContext context) {
+    final isLast = game.currentLevelIndex == game.levels.length - 1;
     return AlertDialog(
-      title: const Text('🎉 You Win!'),
+      title: Text(isLast ? '🏆 All Levels Done!' : '🎉 Level Complete!'),
       actions: [
         TextButton(
           onPressed: () {
             Navigator.of(context).pop();
-            game.reset();
+            game.nextLevel();
           },
-          child: const Text('Play Again'),
+          child: Text(isLast ? 'Restart' : 'Next Level'),
         ),
       ],
     );
