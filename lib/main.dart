@@ -1,175 +1,175 @@
 import 'package:flutter/material.dart';
+import 'package:flame/game.dart';
+import 'package:flame/components.dart';
+import 'package:flame/collisions.dart';
 import 'package:sensors_plus/sensors_plus.dart';
-import 'dart:async';
 
-void main() => runApp(TiltMazeApp());
-
-class TiltMazeApp extends StatefulWidget {
-  @override
-  _TiltMazeAppState createState() => _TiltMazeAppState();
+void main() {
+  runApp(
+    GameWidget(
+      game: TiltMazeGame(),
+      overlayBuilderMap: {
+        'win': (_, game) => WinOverlay(game: game as TiltMazeGame),
+      },
+    ),
+  );
 }
 
-class _TiltMazeAppState extends State<TiltMazeApp> {
-  double posX = 0;
-  double posY = 0;
+// =========================
+// ✅ The Game Class
+// =========================
+
+class TiltMazeGame extends FlameGame with HasCollisionDetection {
+  late Ball ball;
+  late Goal goal;
 
   double speedX = 0;
   double speedY = 0;
 
-  final double ballSize = 30;
-  final double areaWidth = 400;
-  final double areaHeight = 600;
-
-  final double goalSize = 40;
-
-  StreamSubscription? accel;
-
   @override
-  void initState() {
-    super.initState();
+  Future<void> onLoad() async {
+    // Add Ball
+    ball = Ball()
+      ..size = Vector2.all(30)
+      ..position = size / 2;
+    add(ball);
 
-    accel = accelerometerEvents.listen((event) {
-      setState(() {
-        // Control sensitivity
-        speedX += event.x * -0.2; // invert X for natural feel
-        speedY += event.y * 0.2;
+    // Add Walls
+    add(Wall(
+      position: Vector2(200, 300),
+      size: Vector2(100, 20),
+    ));
 
-        // Apply speed
-        posX += speedX;
-        posY += speedY;
+    add(Wall(
+      position: Vector2(100, 500),
+      size: Vector2(20, 100),
+    ));
 
-        // Friction
-        speedX *= 0.95;
-        speedY *= 0.95;
+    // Add Goal
+    goal = Goal()
+      ..size = Vector2.all(40)
+      ..position = Vector2(size.x - 60, size.y - 60);
+    add(goal);
 
-        // Keep inside box
-        posX = posX.clamp(-areaWidth / 2 + ballSize / 2, areaWidth / 2 - ballSize / 2);
-        posY = posY.clamp(-areaHeight / 2 + ballSize / 2, areaHeight / 2 - ballSize / 2);
-
-        // Check goal
-        checkWin();
-
-        // Check simple wall collision
-        checkWallCollision();
-      });
+    // Listen to tilt
+    accelerometerEvents.listen((event) {
+      speedX += event.x * -10;
+      speedY += event.y * 10;
     });
   }
 
-  void checkWin() {
-    // Goal at bottom right corner
-    double goalX = areaWidth / 2 - 60;
-    double goalY = areaHeight / 2 - 60;
+  @override
+  void update(double dt) {
+    super.update(dt);
 
-    double dx = posX - goalX;
-    double dy = posY - goalY;
+    // Update ball position
+    ball.position.add(Vector2(speedX, speedY) * dt);
 
-    if (dx.abs() < goalSize / 2 && dy.abs() < goalSize / 2) {
-      showWinDialog();
+    // Friction
+    speedX *= 0.9;
+    speedY *= 0.9;
+
+    // Keep inside screen
+    ball.position.clamp(
+      Vector2.zero() + ball.size / 2,
+      size - ball.size / 2,
+    );
+
+    // Win check
+    if (ball.toRect().overlaps(goal.toRect())) {
+      overlays.add('win');
+      pauseEngine();
     }
   }
 
-  void showWinDialog() {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text('You Win! 🎉'),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              resetGame();
-            },
-            child: Text('Play Again'),
-          )
-        ],
-      ),
-    );
-  }
-
-  void resetGame() {
-    posX = 0;
-    posY = 0;
+  void reset() {
+    ball.position = size / 2;
     speedX = 0;
     speedY = 0;
+    resumeEngine();
+    overlays.remove('win');
   }
+}
 
-  void checkWallCollision() {
-    // Example wall: horizontal wall in middle
-    // Wall area: -50 < posX < 50, -10 < posY < 10
+// =========================
+// ✅ Ball Component
+// =========================
 
-    if (posX > -50 && posX < 50 && posY > -10 && posY < 10) {
-      // Simple bounce back
-      if (posY > 0) {
-        posY = 10; // push outside
-      } else {
-        posY = -10;
-      }
-      speedY = -speedY * 0.5;
-    }
+class Ball extends PositionComponent with CollisionCallbacks {
+  Ball() {
+    add(CircleHitbox());
   }
 
   @override
-  void dispose() {
-    accel?.cancel();
-    super.dispose();
+  void render(Canvas canvas) {
+    super.render(canvas);
+    final paint = Paint()..color = Colors.blue;
+    canvas.drawCircle(
+      Offset(size.x / 2, size.y / 2),
+      size.x / 2,
+      paint,
+    );
   }
+}
+
+// =========================
+// ✅ Wall Component
+// =========================
+
+class Wall extends PositionComponent with CollisionCallbacks {
+  Wall({required Vector2 position, required Vector2 size}) {
+    this.position = position;
+    this.size = size;
+    add(RectangleHitbox());
+  }
+
+  @override
+  void render(Canvas canvas) {
+    super.render(canvas);
+    final paint = Paint()..color = Colors.black;
+    canvas.drawRect(size.toRect(), paint);
+  }
+}
+
+// =========================
+// ✅ Goal Component
+// =========================
+
+class Goal extends PositionComponent {
+  @override
+  void render(Canvas canvas) {
+    super.render(canvas);
+    final paint = Paint()..color = Colors.green;
+    canvas.drawCircle(
+      Offset(size.x / 2, size.y / 2),
+      size.x / 2,
+      paint,
+    );
+  }
+}
+
+// =========================
+// ✅ Win Overlay
+// =========================
+
+class WinOverlay extends StatelessWidget {
+  final TiltMazeGame game;
+
+  const WinOverlay({super.key, required this.game});
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      home: Scaffold(
-        appBar: AppBar(title: Text('Tilt Maze Game')),
-        body: Center(
-          child: Container(
-            width: areaWidth,
-            height: areaHeight,
-            color: Colors.grey.shade300,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                // Ball
-                Positioned(
-                  left: areaWidth / 2 + posX - ballSize / 2,
-                  top: areaHeight / 2 + posY - ballSize / 2,
-                  child: Container(
-                    width: ballSize,
-                    height: ballSize,
-                    decoration: BoxDecoration(
-                      color: Colors.blue,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                ),
-
-                // Goal
-                Positioned(
-                  left: areaWidth - 60 - goalSize / 2,
-                  top: areaHeight - 60 - goalSize / 2,
-                  child: Container(
-                    width: goalSize,
-                    height: goalSize,
-                    decoration: BoxDecoration(
-                      color: Colors.green,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                ),
-
-                // Wall
-                Positioned(
-                  left: areaWidth / 2 - 50,
-                  top: areaHeight / 2 - 10,
-                  child: Container(
-                    width: 100,
-                    height: 20,
-                    color: Colors.black,
-                  ),
-                ),
-              ],
-            ),
-          ),
+    return AlertDialog(
+      title: const Text('🎉 You Win!'),
+      actions: [
+        TextButton(
+          onPressed: () {
+            Navigator.of(context).pop();
+            game.reset();
+          },
+          child: const Text('Play Again'),
         ),
-      ),
+      ],
     );
   }
 }
