@@ -5,6 +5,7 @@ import 'package:flame_forge2d/flame_forge2d.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:sensors_plus/sensors_plus.dart';
+import 'package:flame/components.dart'; // ✅ for Anchor
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -62,8 +63,7 @@ class TiltMazePhysicsGame extends Forge2DGame with ContactCallbacks {
   TiltMazePhysicsGame(this.levels)
       : super(
           gravity: Vector2.zero(),
-          zoom: 30,
-          world: Forge2DWorld(),
+          zoom: 30, // adjust for scale
         );
 
   final List<LevelData> levels;
@@ -75,13 +75,11 @@ class TiltMazePhysicsGame extends Forge2DGame with ContactCallbacks {
   Vector2 lastForce = Vector2.zero();
 
   @override
-  Color backgroundColor() => const Color(0xFFE0E0E0); // light gray
+  Color backgroundColor() => const Color(0xFFE0E0E0);
 
   @override
   Future<void> onLoad() async {
-    camera.viewport = FixedResolutionViewport(Vector2(600, 800));
-    camera.viewfinder.anchor = Anchor.center;
-    camera.followVector2(Vector2.zero());
+    camera.viewfinder.anchor = Anchor.center; // ✅ works fine
     await loadLevel();
 
     accelerometerEvents.listen((event) {
@@ -157,7 +155,7 @@ class Ball extends BodyComponent {
     final paint = Paint()..color = Colors.blue;
     canvas.drawCircle(
       Offset.zero,
-      0.3 * game.camera.viewfinder.zoom,
+      0.3 * game.zoom,
       paint,
     );
   }
@@ -182,12 +180,12 @@ class Wall extends BodyComponent {
 
   @override
   void render(Canvas canvas) {
-    final paint = Paint()..color = Colors.grey.shade800; // dark gray walls
+    final paint = Paint()..color = Colors.grey.shade800;
     canvas.drawRect(
       Rect.fromCenter(
         center: Offset.zero,
-        width: size.x * 2 * game.camera.viewfinder.zoom,
-        height: size.y * 2 * game.camera.viewfinder.zoom,
+        width: size.x * 2 * game.zoom,
+        height: size.y * 2 * game.zoom,
       ),
       paint,
     );
@@ -221,7 +219,7 @@ class Goal extends BodyComponent {
     final paint = Paint()..color = Colors.green;
     canvas.drawCircle(
       Offset.zero,
-      0.4 * game.camera.viewfinder.zoom,
+      0.4 * game.zoom,
       paint,
     );
     canvas.restore();
