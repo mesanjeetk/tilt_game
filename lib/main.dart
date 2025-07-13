@@ -155,7 +155,7 @@ class Ball extends BodyComponent {
     final paint = Paint()..color = Colors.blue;
     canvas.drawCircle(
       Offset.zero,
-      0.3 * game.zoom,
+      0.3 * game.camera.viewfinder.zoom,
       paint,
     );
   }
@@ -184,8 +184,8 @@ class Wall extends BodyComponent {
     canvas.drawRect(
       Rect.fromCenter(
         center: Offset.zero,
-        width: size.x * 2 * game.zoom,
-        height: size.y * 2 * game.zoom,
+        width: size.x * 2 * game.camera.viewfinder.zoom,
+        height: size.y * 2 * game.camera.viewfinder.zoom,
       ),
       paint,
     );
@@ -219,7 +219,7 @@ class Goal extends BodyComponent {
     final paint = Paint()..color = Colors.green;
     canvas.drawCircle(
       Offset.zero,
-      0.4 * game.zoom,
+      0.4 * game.camera.viewfinder.zoom,
       paint,
     );
     canvas.restore();
