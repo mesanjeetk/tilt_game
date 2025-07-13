@@ -14,7 +14,6 @@ dependencies:
   saf: ^1.0.3+4
   path_provider: ^2.1.5
   syncfusion_flutter_pdfviewer: ^30.1.39
-  google_mobile_ads: ^6.0.0
   cupertino_icons: ^1.0.8
 
 dev_dependencies:

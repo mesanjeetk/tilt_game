@@ -1,306 +1,175 @@
 import 'dart:convert';
-import 'dart:typed_data';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
-import 'package:saf/saf.dart';
+import 'package:flutter_pdfview/flutter_pdfview.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
-import 'package:google_mobile_ads/google_mobile_ads.dart';
+import 'package:saf/saf.dart';
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  await MobileAds.instance.initialize();
-  runApp(const MyApp());
+void main() {
+  runApp(MaterialApp(home: SAFDownloader()));
 }
 
-const filesToDownload = [
-  {
-    'name': 'ch1.pdf',
-    'url': 'https://mesanjeetk.github.io/neetx-2024/physics/ch1.pdf',
-  },
-  {
-    'name': 'ch2.pdf',
-    'url': 'https://mesanjeetk.github.io/neetx-2024/physics/ch1.pdf',
-  },
-  // Add more chapters!
-];
-
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class SAFDownloader extends StatefulWidget {
   @override
-  Widget build(BuildContext context) {
-    return const MaterialApp(
-      home: SAFCacheApp(),
-    );
-  }
+  State<SAFDownloader> createState() => _SAFDownloaderState();
 }
 
-class SAFCacheApp extends StatefulWidget {
-  const SAFCacheApp({super.key});
-  @override
-  State<SAFCacheApp> createState() => _SAFCacheAppState();
-}
-
-class _SAFCacheAppState extends State<SAFCacheApp> {
+class _SAFDownloaderState extends State<SAFDownloader> {
   SAF? saf;
-  late File cacheFile;
-  Map<String, dynamic> cacheData = {};
-  bool loading = true;
+  Map<String, String> cache = {};
+  double progress = 0.0;
 
-  RewardedAd? rewardedAd;
-  Map<String, double> downloadProgress = {}; // Store progress per file
+  final files = {
+    'Chapter 1': 'https://mesanjeetk.github.io/neetx-2024/physics/ch1.pdf',
+    'Chapter 2': 'https://mesanjeetk.github.io/neetx-2024/physics/ch1.pdf',
+  };
 
   @override
   void initState() {
     super.initState();
-    initCache();
-    loadRewardedAd();
+    loadCache();
   }
 
-  Future<void> initCache() async {
+  Future<void> loadCache() async {
     final dir = await getApplicationDocumentsDirectory();
-    cacheFile = File('${dir.path}/cache.json');
-
-    if (await cacheFile.exists()) {
-      cacheData = jsonDecode(await cacheFile.readAsString());
-    } else {
-      cacheData = {'folderUri': null, 'files': []};
-    }
-
-    if (cacheData['folderUri'] != null) {
-      saf = SAF.fromUri(Uri.parse(cacheData['folderUri']));
-      final validFiles = <dynamic>[];
-      for (final file in cacheData['files']) {
-        final exists = await saf!.exists(file['path']);
-        if (exists) validFiles.add(file);
+    final file = File('${dir.path}/cache.json');
+    if (await file.exists()) {
+      final json = jsonDecode(await file.readAsString());
+      cache = Map<String, String>.from(json['files']);
+      if (json['folderUri'] != null) {
+        saf = SAF.fromUri(Uri.parse(json['folderUri']));
       }
-      cacheData['files'] = validFiles;
-      await saveCache();
+      await verifyFiles();
     }
+    setState(() {});
+  }
 
-    setState(() => loading = false);
+  Future<void> verifyFiles() async {
+    final verified = <String, String>{};
+    for (final entry in cache.entries) {
+      final file = File(entry.value);
+      if (await file.exists()) {
+        verified[entry.key] = entry.value;
+      }
+    }
+    cache = verified;
+    await saveCache();
+  }
+
+  Future<void> saveCache() async {
+    final dir = await getApplicationDocumentsDirectory();
+    final file = File('${dir.path}/cache.json');
+    final json = {
+      'folderUri': saf?.uri.toString(),
+      'files': cache,
+    };
+    await file.writeAsString(jsonEncode(json));
   }
 
   Future<void> pickFolder() async {
     saf = await SAF.getDirectoryPermission(isDynamic: true);
-    if (saf != null) {
-      cacheData['folderUri'] = saf!.persistableUri.toString();
-      await saveCache();
-      setState(() {});
-    }
+    await saveCache();
+    setState(() {});
   }
 
-  Future<void> loadRewardedAd() async {
-    await RewardedAd.load(
-      adUnitId: RewardedAd.testAdUnitId,
-      request: const AdRequest(),
-      rewardedAdLoadCallback: RewardedAdLoadCallback(
-        onAdLoaded: (ad) {
-          rewardedAd = ad;
-        },
-        onAdFailedToLoad: (error) {
-          debugPrint('Failed to load rewarded ad: $error');
-          rewardedAd = null;
-        },
-      ),
-    );
-  }
-
-  Future<void> showRewardedAd() async {
-    if (rewardedAd == null) return;
-    rewardedAd!.show(
-      onUserEarnedReward: (ad, reward) {
-        debugPrint('User earned reward.');
-      },
-    );
-    rewardedAd = null;
-    loadRewardedAd();
-  }
-
-  Future<void> downloadFile(Map<String, String> fileInfo) async {
+  Future<void> downloadFile(String name, String url) async {
     if (saf == null) {
       await pickFolder();
       if (saf == null) return;
     }
 
+    final fileName = '$name.pdf';
     final dio = Dio();
 
     final response = await dio.get<List<int>>(
-      fileInfo['url']!,
-      options: Options(responseType: ResponseType.stream),
+      url,
+      options: Options(responseType: ResponseType.bytes),
+      onReceiveProgress: (received, total) {
+        setState(() {
+          progress = received / total;
+        });
+      },
     );
 
-    final bytes = <int>[];
-    final total = response.headers.map['content-length'] != null
-        ? int.parse(response.headers.map['content-length']!.first)
-        : null;
+    final tempDir = await getTemporaryDirectory();
+    final tempFile = File('${tempDir.path}/$fileName');
+    await tempFile.writeAsBytes(response.data!);
 
-    int received = 0;
+    final writtenFile = await saf!.writeToFile(
+      name: fileName,
+      bytes: response.data!,
+      mimeType: 'application/pdf',
+    );
 
-    final stream = response.data!.stream;
-    await for (final chunk in stream) {
-      bytes.addAll(chunk);
-      received += chunk.length;
+    cache[name] = writtenFile!.path;
+    await saveCache();
 
-      if (total != null) {
-        setState(() {
-          downloadProgress[fileInfo['url']!] = received / total;
-        });
-      }
-    }
-
-    final outputPath =
-        await saf!.writeFile(Uint8List.fromList(bytes), fileName: fileInfo['name']);
-
-    cacheData['files'].add({
-      'name': fileInfo['name'],
-      'url': fileInfo['url'],
-      'path': outputPath,
-      'lastPage': 0,
+    setState(() {
+      progress = 0;
     });
 
-    downloadProgress.remove(fileInfo['url']);
-    await saveCache();
-    await showRewardedAd();
-    setState(() {});
+    openPdf(writtenFile.path);
   }
 
-  Future<void> saveCache() async {
-    await cacheFile.writeAsString(jsonEncode(cacheData), flush: true);
-  }
-
-  void openFile(Map<String, dynamic> file) {
+  void openPdf(String path) {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => PDFReaderPage(
-          saf: saf!,
-          filePath: file['path'],
-          fileName: file['name'],
-        ),
+        builder: (_) => PDFViewPage(path: path),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    if (loading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    }
-
     return Scaffold(
-      appBar: AppBar(title: const Text('📚 SAF PDF Manager')),
-      body: ListView(
-        children: filesToDownload.map((fileInfo) {
-          final localFile = cacheData['files'].firstWhere(
-            (f) => f['url'] == fileInfo['url'],
-            orElse: () => null,
-          );
-          final progress = downloadProgress[fileInfo['url']!] ?? 0.0;
-
-          return ListTile(
-            title: Text(fileInfo['name']!),
-            subtitle: progress > 0
-                ? LinearProgressIndicator(value: progress)
-                : localFile != null && localFile['lastPage'] > 0
-                    ? Text('Last page read: ${localFile['lastPage'] + 1}')
-                    : null,
-            trailing: localFile == null
-                ? ElevatedButton(
-                    onPressed: () => downloadFile(fileInfo),
-                    child: const Text('Download'),
-                  )
-                : ElevatedButton(
-                    onPressed: () => openFile(localFile),
-                    child: const Text('Open'),
-                  ),
-          );
-        }).toList(),
-      ),
-    );
-  }
-}
-
-class PDFReaderPage extends StatefulWidget {
-  final SAF saf;
-  final String filePath;
-  final String fileName;
-
-  const PDFReaderPage({
-    super.key,
-    required this.saf,
-    required this.filePath,
-    required this.fileName,
-  });
-
-  @override
-  State<PDFReaderPage> createState() => _PDFReaderPageState();
-}
-
-class _PDFReaderPageState extends State<PDFReaderPage> {
-  final PdfViewerController _controller = PdfViewerController();
-  BannerAd? bannerAd;
-
-  Future<Uint8List> loadBytes() async {
-    return await widget.saf.readFile(widget.filePath);
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    bannerAd = BannerAd(
-      adUnitId: BannerAd.testAdUnitId,
-      size: AdSize.banner,
-      request: const AdRequest(),
-      listener: BannerAdListener(
-        onAdLoaded: (_) {
-          setState(() {});
-        },
-        onAdFailedToLoad: (ad, error) {
-          ad.dispose();
-        },
-      ),
-    )..load();
-  }
-
-  @override
-  void dispose() {
-    bannerAd?.dispose();
-    super.dispose();
-  }
-
-  Widget buildBanner() {
-    return bannerAd == null
-        ? const SizedBox.shrink()
-        : SizedBox(
-            width: bannerAd!.size.width.toDouble(),
-            height: bannerAd!.size.height.toDouble(),
-            child: AdWidget(ad: bannerAd!),
-          );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text(widget.fileName)),
+      appBar: AppBar(title: Text('SAF PDF Downloader')),
       body: Column(
         children: [
+          if (progress > 0)
+            LinearProgressIndicator(value: progress),
           Expanded(
-            child: FutureBuilder<Uint8List>(
-              future: loadBytes(),
-              builder: (context, snapshot) {
-                if (snapshot.hasData) {
-                  return SfPdfViewer.memory(snapshot.data!);
-                } else {
-                  return const Center(child: CircularProgressIndicator());
-                }
-              },
+            child: ListView(
+              children: files.entries.map((entry) {
+                final downloaded = cache.containsKey(entry.key);
+                return ListTile(
+                  title: Text(entry.key),
+                  subtitle: downloaded
+                      ? Text('Downloaded')
+                      : Text('Not downloaded'),
+                  trailing: ElevatedButton(
+                    onPressed: () {
+                      if (downloaded) {
+                        openPdf(cache[entry.key]!);
+                      } else {
+                        downloadFile(entry.key, entry.value);
+                      }
+                    },
+                    child: Text(downloaded ? 'Open' : 'Download'),
+                  ),
+                );
+              }).toList(),
             ),
           ),
-          buildBanner(),
         ],
+      ),
+    );
+  }
+}
+
+class PDFViewPage extends StatelessWidget {
+  final String path;
+
+  PDFViewPage({required this.path});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text('PDF Viewer')),
+      body: PDFView(
+        filePath: path,
       ),
     );
   }
