@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 import 'package:flame/game.dart';
 import 'package:flame_forge2d/flame_forge2d.dart';
 import 'package:flutter/material.dart';
@@ -58,7 +59,12 @@ class WallData {
 }
 
 class TiltMazePhysicsGame extends Forge2DGame with ContactCallbacks {
-  TiltMazePhysicsGame(this.levels) : super(gravity: Vector2.zero(), zoom: 30);
+  TiltMazePhysicsGame(this.levels)
+      : super(
+          gravity: Vector2.zero(),
+          zoom: 30,
+          world: Forge2DWorld(),
+        );
 
   final List<LevelData> levels;
   int currentLevelIndex = 0;
@@ -66,12 +72,27 @@ class TiltMazePhysicsGame extends Forge2DGame with ContactCallbacks {
   late Ball ball;
   Goal? goal;
 
+  Vector2 lastForce = Vector2.zero();
+
+  @override
+  Color backgroundColor() => const Color(0xFFE0E0E0); // light gray
+
   @override
   Future<void> onLoad() async {
+    camera.viewport = FixedResolutionViewport(Vector2(600, 800));
+    camera.viewfinder.anchor = Anchor.center;
+    camera.followVector2(Vector2.zero());
     await loadLevel();
+
     accelerometerEvents.listen((event) {
-      ball.body.applyForce(Vector2(-event.x, event.y) * 5);
+      lastForce = Vector2(-event.x, event.y) * 5;
     });
+  }
+
+  @override
+  void update(double dt) {
+    super.update(dt);
+    ball.body.applyLinearImpulse(lastForce * dt);
   }
 
   Future<void> loadLevel() async {
@@ -161,7 +182,7 @@ class Wall extends BodyComponent {
 
   @override
   void render(Canvas canvas) {
-    final paint = Paint()..color = Colors.black;
+    final paint = Paint()..color = Colors.grey.shade800; // dark gray walls
     canvas.drawRect(
       Rect.fromCenter(
         center: Offset.zero,
