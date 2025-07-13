@@ -1,250 +1,307 @@
 import 'dart:convert';
-import 'dart:math';
-import 'package:flame/game.dart';
-import 'package:flame_forge2d/flame_forge2d.dart';
+import 'dart:typed_data';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show rootBundle;
-import 'package:sensors_plus/sensors_plus.dart';
-import 'package:flame/components.dart'; // ✅ for Anchor
+import 'package:dio/dio.dart';
+import 'package:saf/saf.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  final levels = await loadLevels();
-  runApp(
-    GameWidget(
-      game: TiltMazePhysicsGame(levels),
-      overlayBuilderMap: {
-        'win': (_, game) => WinOverlay(game: game as TiltMazePhysicsGame),
-      },
-    ),
-  );
+  await MobileAds.instance.initialize();
+  runApp(const MyApp());
 }
 
-Future<List<LevelData>> loadLevels() async {
-  final String data = await rootBundle.loadString('assets/levels.json');
-  final jsonResult = jsonDecode(data);
-  return (jsonResult['levels'] as List)
-      .map((e) => LevelData.fromJson(e))
-      .toList();
-}
+const filesToDownload = [
+  {
+    'name': 'ch1.pdf',
+    'url': 'https://mesanjeetk.github.io/neetx-2024/physics/ch1.pdf',
+  },
+  {
+    'name': 'ch2.pdf',
+    'url': 'https://mesanjeetk.github.io/neetx-2024/physics/ch1.pdf',
+  },
+  // Add more chapters!
+];
 
-class LevelData {
-  final Vector2 goal;
-  final List<WallData> walls;
-
-  LevelData({required this.goal, required this.walls});
-
-  factory LevelData.fromJson(Map<String, dynamic> json) {
-    return LevelData(
-      goal: Vector2(json['goal']['x'].toDouble(), json['goal']['y'].toDouble()),
-      walls: (json['walls'] as List)
-          .map((w) => WallData.fromJson(w))
-          .toList(),
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+  @override
+  Widget build(BuildContext context) {
+    return const MaterialApp(
+      home: SAFCacheApp(),
     );
   }
 }
 
-class WallData {
-  final double x, y, w, h;
-
-  WallData({required this.x, required this.y, required this.w, required this.h});
-
-  factory WallData.fromJson(Map<String, dynamic> json) {
-    return WallData(
-      x: json['x'].toDouble(),
-      y: json['y'].toDouble(),
-      w: json['w'].toDouble(),
-      h: json['h'].toDouble(),
-    );
-  }
+class SAFCacheApp extends StatefulWidget {
+  const SAFCacheApp({super.key});
+  @override
+  State<SAFCacheApp> createState() => _SAFCacheAppState();
 }
 
-class TiltMazePhysicsGame extends Forge2DGame with ContactCallbacks {
-  TiltMazePhysicsGame(this.levels)
-      : super(
-          gravity: Vector2.zero(),
-          zoom: 30, // adjust for scale
-        );
+class _SAFCacheAppState extends State<SAFCacheApp> {
+  SAF? saf;
+  late File cacheFile;
+  Map<String, dynamic> cacheData = {};
+  bool loading = true;
 
-  final List<LevelData> levels;
-  int currentLevelIndex = 0;
-
-  late Ball ball;
-  Goal? goal;
-
-  Vector2 lastForce = Vector2.zero();
+  RewardedAd? rewardedAd;
+  Map<String, double> downloadProgress = {}; // Store progress per file
 
   @override
-  Color backgroundColor() => const Color(0xFFE0E0E0);
-
-  @override
-  Future<void> onLoad() async {
-    camera.viewfinder.anchor = Anchor.center; // ✅ works fine
-    await loadLevel();
-
-    accelerometerEvents.listen((event) {
-      lastForce = Vector2(-event.x, event.y) * 5;
-    });
+  void initState() {
+    super.initState();
+    initCache();
+    loadRewardedAd();
   }
 
-  @override
-  void update(double dt) {
-    super.update(dt);
-    ball.body.applyLinearImpulse(lastForce * dt);
-  }
+  Future<void> initCache() async {
+    final dir = await getApplicationDocumentsDirectory();
+    cacheFile = File('${dir.path}/cache.json');
 
-  Future<void> loadLevel() async {
-    children.whereType<BodyComponent>().forEach((b) => b.removeFromParent());
-    final level = levels[currentLevelIndex];
-
-    ball = Ball(this);
-    add(ball);
-
-    goal = Goal(this, level.goal);
-    add(goal!);
-
-    for (var w in level.walls) {
-      add(Wall(this, Vector2(w.x, w.y), Vector2(w.w, w.h)));
-    }
-  }
-
-  @override
-  void beginContact(Object other, Contact contact) {
-    final a = contact.fixtureA.body.userData;
-    final b = contact.fixtureB.body.userData;
-
-    if ((a is Ball && b is Goal) || (b is Ball && a is Goal)) {
-      overlays.add('win');
-      pauseEngine();
-    }
-  }
-
-  void nextLevel() {
-    if (currentLevelIndex < levels.length - 1) {
-      currentLevelIndex++;
+    if (await cacheFile.exists()) {
+      cacheData = jsonDecode(await cacheFile.readAsString());
     } else {
-      currentLevelIndex = 0;
+      cacheData = {'folderUri': null, 'files': []};
     }
-    loadLevel();
-    resumeEngine();
-    overlays.remove('win');
-  }
-}
 
-class Ball extends BodyComponent {
-  final TiltMazePhysicsGame game;
+    if (cacheData['folderUri'] != null) {
+      saf = SAF.fromUri(Uri.parse(cacheData['folderUri']));
+      final validFiles = <dynamic>[];
+      for (final file in cacheData['files']) {
+        final exists = await saf!.exists(file['path']);
+        if (exists) validFiles.add(file);
+      }
+      cacheData['files'] = validFiles;
+      await saveCache();
+    }
 
-  Ball(this.game);
-
-  @override
-  Body createBody() {
-    final shape = CircleShape()..radius = 0.3;
-    final fixtureDef = FixtureDef(shape)
-      ..density = 1.0
-      ..restitution = 0.8;
-    final bodyDef = BodyDef()
-      ..type = BodyType.dynamic
-      ..position = Vector2.zero();
-    final body = world.createBody(bodyDef)..createFixture(fixtureDef);
-    body.userData = this;
-    return body;
+    setState(() => loading = false);
   }
 
-  @override
-  void render(Canvas canvas) {
-    final paint = Paint()..color = Colors.blue;
-    canvas.drawCircle(
-      Offset.zero,
-      0.3 * game.camera.viewfinder.zoom,
-      paint,
-    );
-  }
-}
-
-class Wall extends BodyComponent {
-  final TiltMazePhysicsGame game;
-  final Vector2 pos, size;
-
-  Wall(this.game, this.pos, this.size);
-
-  @override
-  Body createBody() {
-    final shape = PolygonShape()..setAsBoxXY(size.x, size.y);
-    final fixtureDef = FixtureDef(shape);
-    final bodyDef = BodyDef()
-      ..type = BodyType.static
-      ..position = pos;
-    final body = world.createBody(bodyDef)..createFixture(fixtureDef);
-    return body;
+  Future<void> pickFolder() async {
+    saf = await SAF.getDirectoryPermission(isDynamic: true);
+    if (saf != null) {
+      cacheData['folderUri'] = saf!.persistableUri.toString();
+      await saveCache();
+      setState(() {});
+    }
   }
 
-  @override
-  void render(Canvas canvas) {
-    final paint = Paint()..color = Colors.grey.shade800;
-    canvas.drawRect(
-      Rect.fromCenter(
-        center: Offset.zero,
-        width: size.x * 2 * game.camera.viewfinder.zoom,
-        height: size.y * 2 * game.camera.viewfinder.zoom,
+  Future<void> loadRewardedAd() async {
+    await RewardedAd.load(
+      adUnitId: RewardedAd.testAdUnitId,
+      request: const AdRequest(),
+      rewardedAdLoadCallback: RewardedAdLoadCallback(
+        onAdLoaded: (ad) {
+          rewardedAd = ad;
+        },
+        onAdFailedToLoad: (error) {
+          debugPrint('Failed to load rewarded ad: $error');
+          rewardedAd = null;
+        },
       ),
-      paint,
     );
   }
-}
 
-class Goal extends BodyComponent {
-  final TiltMazePhysicsGame game;
-  final Vector2 pos;
-  double angle = 0;
-
-  Goal(this.game, this.pos);
-
-  @override
-  Body createBody() {
-    final shape = CircleShape()..radius = 0.4;
-    final fixtureDef = FixtureDef(shape)..isSensor = true;
-    final bodyDef = BodyDef()
-      ..type = BodyType.static
-      ..position = pos;
-    final body = world.createBody(bodyDef)..createFixture(fixtureDef);
-    body.userData = this;
-    return body;
-  }
-
-  @override
-  void render(Canvas canvas) {
-    angle += 0.05;
-    canvas.save();
-    canvas.rotate(angle);
-    final paint = Paint()..color = Colors.green;
-    canvas.drawCircle(
-      Offset.zero,
-      0.4 * game.camera.viewfinder.zoom,
-      paint,
+  Future<void> showRewardedAd() async {
+    if (rewardedAd == null) return;
+    rewardedAd!.show(
+      onUserEarnedReward: (ad, reward) {
+        debugPrint('User earned reward.');
+      },
     );
-    canvas.restore();
+    rewardedAd = null;
+    loadRewardedAd();
   }
-}
 
-class WinOverlay extends StatelessWidget {
-  final TiltMazePhysicsGame game;
+  Future<void> downloadFile(Map<String, String> fileInfo) async {
+    if (saf == null) {
+      await pickFolder();
+      if (saf == null) return;
+    }
 
-  const WinOverlay({super.key, required this.game});
+    final dio = Dio();
+
+    final response = await dio.get<List<int>>(
+      fileInfo['url']!,
+      options: Options(responseType: ResponseType.stream),
+    );
+
+    final bytes = <int>[];
+    final total = response.headers.map['content-length'] != null
+        ? int.parse(response.headers.map['content-length']!.first)
+        : null;
+
+    int received = 0;
+
+    final stream = response.data!.stream;
+    await for (final chunk in stream) {
+      bytes.addAll(chunk);
+      received += chunk.length;
+
+      if (total != null) {
+        setState(() {
+          downloadProgress[fileInfo['url']!] = received / total;
+        });
+      }
+    }
+
+    final outputPath =
+        await saf!.writeFile(Uint8List.fromList(bytes), fileName: fileInfo['name']);
+
+    cacheData['files'].add({
+      'name': fileInfo['name'],
+      'url': fileInfo['url'],
+      'path': outputPath,
+      'lastPage': 0,
+    });
+
+    downloadProgress.remove(fileInfo['url']);
+    await saveCache();
+    await showRewardedAd();
+    setState(() {});
+  }
+
+  Future<void> saveCache() async {
+    await cacheFile.writeAsString(jsonEncode(cacheData), flush: true);
+  }
+
+  void openFile(Map<String, dynamic> file) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => PDFReaderPage(
+          saf: saf!,
+          filePath: file['path'],
+          fileName: file['name'],
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final isLast = game.currentLevelIndex == game.levels.length - 1;
-    return AlertDialog(
-      title: Text(isLast ? '🏆 All Levels Done!' : '🎉 Level Complete!'),
-      actions: [
-        TextButton(
-          onPressed: () {
-            Navigator.of(context).pop();
-            game.nextLevel();
-          },
-          child: Text(isLast ? 'Restart' : 'Next Level'),
-        ),
-      ],
+    if (loading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('📚 SAF PDF Manager')),
+      body: ListView(
+        children: filesToDownload.map((fileInfo) {
+          final localFile = cacheData['files'].firstWhere(
+            (f) => f['url'] == fileInfo['url'],
+            orElse: () => null,
+          );
+          final progress = downloadProgress[fileInfo['url']!] ?? 0.0;
+
+          return ListTile(
+            title: Text(fileInfo['name']!),
+            subtitle: progress > 0
+                ? LinearProgressIndicator(value: progress)
+                : localFile != null && localFile['lastPage'] > 0
+                    ? Text('Last page read: ${localFile['lastPage'] + 1}')
+                    : null,
+            trailing: localFile == null
+                ? ElevatedButton(
+                    onPressed: () => downloadFile(fileInfo),
+                    child: const Text('Download'),
+                  )
+                : ElevatedButton(
+                    onPressed: () => openFile(localFile),
+                    child: const Text('Open'),
+                  ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+class PDFReaderPage extends StatefulWidget {
+  final SAF saf;
+  final String filePath;
+  final String fileName;
+
+  const PDFReaderPage({
+    super.key,
+    required this.saf,
+    required this.filePath,
+    required this.fileName,
+  });
+
+  @override
+  State<PDFReaderPage> createState() => _PDFReaderPageState();
+}
+
+class _PDFReaderPageState extends State<PDFReaderPage> {
+  final PdfViewerController _controller = PdfViewerController();
+  BannerAd? bannerAd;
+
+  Future<Uint8List> loadBytes() async {
+    return await widget.saf.readFile(widget.filePath);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    bannerAd = BannerAd(
+      adUnitId: BannerAd.testAdUnitId,
+      size: AdSize.banner,
+      request: const AdRequest(),
+      listener: BannerAdListener(
+        onAdLoaded: (_) {
+          setState(() {});
+        },
+        onAdFailedToLoad: (ad, error) {
+          ad.dispose();
+        },
+      ),
+    )..load();
+  }
+
+  @override
+  void dispose() {
+    bannerAd?.dispose();
+    super.dispose();
+  }
+
+  Widget buildBanner() {
+    return bannerAd == null
+        ? const SizedBox.shrink()
+        : SizedBox(
+            width: bannerAd!.size.width.toDouble(),
+            height: bannerAd!.size.height.toDouble(),
+            child: AdWidget(ad: bannerAd!),
+          );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text(widget.fileName)),
+      body: Column(
+        children: [
+          Expanded(
+            child: FutureBuilder<Uint8List>(
+              future: loadBytes(),
+              builder: (context, snapshot) {
+                if (snapshot.hasData) {
+                  return SfPdfViewer.memory(snapshot.data!);
+                } else {
+                  return const Center(child: CircularProgressIndicator());
+                }
+              },
+            ),
+          ),
+          buildBanner(),
+        ],
+      ),
     );
   }
 }
