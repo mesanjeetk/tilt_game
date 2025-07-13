@@ -27,16 +27,18 @@ class _SafHomeState extends State<SafHome> {
   String folderName = '';
 
   Future<void> pickFolder() async {
-    final granted = await Saf.getDirectoryPermission(isDynamic: true);
+    saf = Saf("~/Download"); // symbolic, will open picker
 
-    if (granted) {
+    final granted = await saf?.getDirectoryPermission(isDynamic: true);
+
+    if (granted == true) {
       final dirs = await Saf.getPersistedPermissionDirectories();
       if (dirs != null && dirs.isNotEmpty) {
         final uri = dirs.first;
-        saf = Saf.fromUri(Uri.parse(uri));
+        saf = Saf(uri); // recreate if needed
         setState(() {
           folderUri = uri;
-          folderName = saf?.name ?? 'Unknown';
+          folderName = uri.split('%3A').last; // crude way to get last path part
         });
       } else {
         setState(() {
