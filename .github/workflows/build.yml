@@ -2,9 +2,6 @@ name: Bootstrap, Build & Release Flutter APK
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
 
 permissions:
   contents: write
@@ -24,12 +21,6 @@ jobs:
 
       - name: 📦 Get Flutter dependencies
         run: flutter pub get
-
-      - name: 🩹 Patch SAF build.gradle for AGP namespace
-        run: |
-          SAF_PATH="$HOME/.pub-cache/hosted/pub.dev/saf-1.0.3+4/android/build.gradle"
-          echo "Patching: $SAF_PATH"
-          sed -i '/android {/a \ \ \ \ namespace "com.abedalkareem.saf"' "$SAF_PATH"
 
       - name: 🔨 Build APK
         run: flutter build apk --release
