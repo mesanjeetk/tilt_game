@@ -52,6 +52,7 @@ class _PDFMultiDownloaderState extends State<PDFMultiDownloader> {
   Future<void> _initDirAndCache() async {
     appDir = await getApplicationDocumentsDirectory();
     cacheFile = File("${appDir.path}/downloads.json");
+
     if (await cacheFile!.exists()) {
       final content = await cacheFile!.readAsString();
       downloadStatus = jsonDecode(content);
@@ -63,14 +64,15 @@ class _PDFMultiDownloaderState extends State<PDFMultiDownloader> {
   Future<void> _verifyFiles() async {
     bool updated = false;
     for (var pdf in pdfList) {
-      final path = "${appDir.path}/${pdf['file']}";
-      if (downloadStatus[pdf['file']] == true && !(await File(path).exists())) {
-        downloadStatus[pdf['file']] = false;
+      final filename = pdf['file']!;
+      final path = "${appDir.path}/$filename";
+      if (downloadStatus[filename] == true && !(await File(path).exists())) {
+        downloadStatus[filename] = false;
         updated = true;
       }
     }
     if (updated) {
-      await cacheFile!.writeAsString(jsonEncode(downloadStatus));
+      await _saveCache();
     }
   }
 
@@ -109,13 +111,13 @@ class _PDFMultiDownloaderState extends State<PDFMultiDownloader> {
       downloadStatus[filename] = true;
       await _saveCache();
 
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Downloaded ${pdf['name']}!')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Downloaded ${pdf['name']}!')));
       _showViewer(savePath);
 
     } catch (e) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Error: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')));
     } finally {
       setState(() {
         downloadingMap[filename] = false;
@@ -153,7 +155,7 @@ class _PDFMultiDownloaderState extends State<PDFMultiDownloader> {
     }
 
     return Scaffold(
-      appBar: AppBar(title: const Text("Advanced PDF Downloader")),
+      appBar: AppBar(title: const Text("Safe PDF Downloader")),
       body: ListView.builder(
         itemCount: pdfList.length,
         itemBuilder: (context, index) {
